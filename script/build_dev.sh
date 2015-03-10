@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# taken from https://www.airpair.com/nginx/extending-nginx-tutorial
+
+printf "Building nginx in development configuration...\n"
+
+pushd "vendor"
+pushd "nginx-1.4.7"
+CFLAGS="-g -O0" ./configure           \
+    --with-debug                      \
+    --prefix=$(pwd)/../../build/nginx \
+    --conf-path=conf/nginx.conf       \
+    --error-log-path=logs/error.log   \
+    --http-log-path=logs/access.log   \
+    --add-module=../../ngx_http_scm_query_server_proxy_module
+make
+make install
+popd
+popd
