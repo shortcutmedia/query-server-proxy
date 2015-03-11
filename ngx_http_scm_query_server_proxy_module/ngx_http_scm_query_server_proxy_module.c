@@ -3,27 +3,22 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-ngx_module_t ngx_http_scm_query_server_proxy_module;
 
+// Module callbacks
 static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf);
-static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r);
 static void* ngx_http_scm_query_server_proxy_create_loc_conf(ngx_conf_t *cf);
+static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r);
+
+
+// Config file reader
 static char* ngx_http_scm_query_server_proxy_add_scm_auth_rewrite(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 
-static ngx_http_module_t ngx_http_scm_query_server_proxy_module_ctx = {
-  NULL,                                            /* preconfiguration */
-  ngx_http_scm_query_server_proxy_init,            /* postconfiguration */
-  NULL,                                            /* create main configuration */
-  NULL,                                            /* init main configuration */
-  NULL,                                            /* create server configuration */
-  NULL,                                            /* merge server configuration */
-  ngx_http_scm_query_server_proxy_create_loc_conf, /* create location configuration */
-  NULL                                             /* merge location configuration */
-};
+// Helper functions
+// ...
 
 
-// List of config file directives provided by this module
+// Config file directives provided by this module
 static ngx_command_t ngx_http_scm_query_server_proxy_commands[] = {
   {
     // Usage: scm_auth_rewrite SCM_ACCESS_KEY SCM_SECRET_TOKEN KOOABA_ACCESS_KEY KOOABA_SECRET_TOKEN
@@ -37,6 +32,18 @@ static ngx_command_t ngx_http_scm_query_server_proxy_commands[] = {
   ngx_null_command
 };
 
+
+// Module context
+static ngx_http_module_t ngx_http_scm_query_server_proxy_module_ctx = {
+  NULL,                                            /* preconfiguration */
+  ngx_http_scm_query_server_proxy_init,            /* postconfiguration */
+  NULL,                                            /* create main configuration */
+  NULL,                                            /* init main configuration */
+  NULL,                                            /* create server configuration */
+  NULL,                                            /* merge server configuration */
+  ngx_http_scm_query_server_proxy_create_loc_conf, /* create location configuration */
+  NULL                                             /* merge location configuration */
+};
 
 // Module definition
 ngx_module_t ngx_http_scm_query_server_proxy_module = {
@@ -70,6 +77,9 @@ typedef struct {
   ngx_array_t *rewrite_rules; // of type scm_auth_rewrite_rule_t
 } ngx_http_scm_query_server_proxy_loc_conf_t;
 
+
+// Init callback. Called when the server starts up.
+//
 // This function sets up the module's callbacks:
 // - ngx_http_scm_query_server_proxy_handler is called for every request in the ACCESS phase
 static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf)
@@ -90,7 +100,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf)
 }
 
 
-// This handler is called for every request in the ACCESS phase
+// Per-request callback. Called for every request in the ACCESS phase
 static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 {
   ngx_http_scm_query_server_proxy_loc_conf_t *loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_scm_query_server_proxy_module);
@@ -109,6 +119,8 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 }
 
 
+// Location creation callback. Called when a location is read from the config file.
+//
 // This function initializes a ngx_http_scm_query_server_proxy_loc_conf_t for a location
 static void* ngx_http_scm_query_server_proxy_create_loc_conf(ngx_conf_t *cf)
 {
