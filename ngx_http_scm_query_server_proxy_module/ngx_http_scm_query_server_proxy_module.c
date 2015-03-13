@@ -116,6 +116,11 @@ static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf)
 // Per-request callback. Called for every request in the ACCESS phase
 static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 {
+  if (r->main->internal) {
+    return NGX_DECLINED;
+  }
+  r->main->internal = 1;
+
   ngx_http_scm_query_server_proxy_loc_conf_t *loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_scm_query_server_proxy_module);
 
   // read Authorization header
