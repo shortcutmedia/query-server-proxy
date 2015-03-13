@@ -5,15 +5,18 @@ task :bootstrap do
   sh 'script/bootstrap.sh'
 end
 
-namespace :build do
+namespace :configure do
 
-  desc 'Compiles nginx with the module in a development configuration'
+  desc 'Configures nginx build for development'
   task :development do
-    sh 'script/build_dev.sh'
+    sh 'script/configure_build_dev.sh'
   end
 end
 
-task build: 'build:development'
+desc 'Builds nginx'
+task :build do
+  sh 'script/build.sh'
+end
 
 desc "Starts nginx"
 task :start do
