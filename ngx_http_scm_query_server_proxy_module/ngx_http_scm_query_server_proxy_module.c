@@ -24,11 +24,14 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r);
 static char* ngx_http_scm_query_server_proxy_add_scm_auth_rewrite(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 
+// "Model" functions
+u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token);
+
+
 // Helper functions
 ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name);
 ngx_str_t* get_request_header_str(ngx_http_request_t *r, u_char *name);
 u_char* encode_base64(u_char *string, u_int len);
-
 
 
 // Config file directives provided by this module
@@ -177,76 +180,10 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
         if (rewrite_rule) {
           ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found auth rewrite rule: %s/%s => %s/%s", rewrite_rule->scm_access_key.data, rewrite_rule->scm_secret_token.data, rewrite_rule->kooaba_access_key.data, rewrite_rule->kooaba_secret_token.data);
 
-          // build the "string-to-sign"
-          ngx_str_t *method_name_str = &r->method_name;
+          // build reference SCM signature
+          u_char *reference_scm_signature = create_request_signature(r, &rewrite_rule->scm_secret_token);
 
-          ngx_str_t *content_md5_str = get_request_header_str(r, "Content-MD5");
-          if (!content_md5_str) {
-            ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Content-MD5 header missing");
-          }
-
-          ngx_str_t full_content_type = ngx_null_string;
-          if (r->headers_in.content_type) {
-            full_content_type = r->headers_in.content_type->value;
-          } else {
-            ngx_table_elt_t *content_type_header = get_request_header(r, "Content-Type");
-            if (content_type_header) { full_content_type = content_type_header->value; }
-          }
-
-          ngx_str_t *content_type_str;
-          if (full_content_type.len > 0) {
-            for (int i = 0; i < full_content_type.len; i++) {
-              if(full_content_type.data[i] == ';') {
-                full_content_type.len = i;
-                break;
-              }
-            }
-            if (full_content_type.len > 0) {
-              content_type_str = &full_content_type;
-            }
-          }
-          if (!content_md5_str) {
-            ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Content-Type header missing");
-          }
-
-          ngx_str_t *date_str = get_request_header_str(r, "Date");
-          if (!content_md5_str) {
-            ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Date header missing");
-          }
-
-          ngx_str_t *path_str = &r->uri;
-
-          if (method_name_str && content_md5_str && content_type_str && date_str && path_str) {
-            u_int string_to_sign_len = method_name_str->len + 1 + content_md5_str->len + 1 + content_type_str->len + 1 + date_str->len + 1 + path_str->len;
-            u_char string_to_sign[string_to_sign_len + 1];
-            u_int offset = 0;
-
-            ngx_memcpy(string_to_sign+offset, method_name_str->data, method_name_str->len);
-            offset += method_name_str->len;
-            ngx_memcpy(string_to_sign+offset, "\n", 1);
-            offset += 1;
-            ngx_memcpy(string_to_sign+offset, content_md5_str->data, content_md5_str->len);
-            offset += content_md5_str->len;
-            ngx_memcpy(string_to_sign+offset, "\n", 1);
-            offset += 1;
-            ngx_memcpy(string_to_sign+offset, content_type_str->data, content_type_str->len);
-            offset += content_type_str->len;
-            ngx_memcpy(string_to_sign+offset, "\n", 1);
-            offset += 1;
-            ngx_memcpy(string_to_sign+offset, date_str->data, date_str->len);
-            offset += date_str->len;
-            ngx_memcpy(string_to_sign+offset, "\n", 1);
-            offset += 1;
-            ngx_memcpy(string_to_sign+offset, path_str->data, path_str->len);
-            offset += path_str->len;
-            ngx_memcpy(string_to_sign+offset, "\0", 1);
-
-            // build reference signature
-            size_t macLen;
-            u_char mac[20];
-            HMAC(EVP_sha1(), rewrite_rule->scm_secret_token.data, rewrite_rule->scm_secret_token.len, string_to_sign, string_to_sign_len, mac, &macLen);
-            u_char *reference_scm_signature = encode_base64(mac, macLen);
-
+          if (reference_scm_signature) {
             ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated reference SCM signature: %s", reference_scm_signature);
 
             // check if request signature matches
@@ -255,26 +192,32 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature matches reference SCM signature");
 
               // calculate kooaba signature
-              HMAC(EVP_sha1(), rewrite_rule->kooaba_secret_token.data, rewrite_rule->kooaba_secret_token.len, string_to_sign, string_to_sign_len, mac, &macLen);
-              u_char *calculated_kooaba_signature = encode_base64(mac, macLen);
+              u_char *calculated_kooaba_signature = create_request_signature(r, &rewrite_rule->kooaba_secret_token);
 
-              ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated kooaba signature: %s", calculated_kooaba_signature);
+              if (calculated_kooaba_signature) {
+                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated kooaba signature: %s", calculated_kooaba_signature);
 
-              // rewrite the Authorization header
-              u_int kooaba_auth_header_len = strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + strlen(calculated_kooaba_signature);
-              u_char *kooaba_auth_header = malloc(kooaba_auth_header_len + 1);
-              sprintf(kooaba_auth_header, "%s%s%c%s", KOOABA_AUTH_HEADER_PREFIX, rewrite_rule->kooaba_access_key.data, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
+                // rewrite the Authorization header
+                u_int kooaba_auth_header_len = strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + strlen(calculated_kooaba_signature);
+                u_char *kooaba_auth_header = malloc(kooaba_auth_header_len + 1);
+                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "allocated: %d at %d", kooaba_auth_header_len, kooaba_auth_header);
+                sprintf(kooaba_auth_header, "%s%.*s%c%s", KOOABA_AUTH_HEADER_PREFIX, rewrite_rule->kooaba_access_key.len, rewrite_rule->kooaba_access_key.data, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
-              ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
-              authorization_header->lowcase_key = "authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
-              authorization_header->value.data = kooaba_auth_header;
-              authorization_header->value.len = kooaba_auth_header_len;
+                ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
+                authorization_header->lowcase_key = "authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
+                authorization_header->value.data = kooaba_auth_header;
+                authorization_header->value.len = kooaba_auth_header_len;
 
-              ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "rewrote the Authorization header: %s", kooaba_auth_header);
+                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "rewrote the Authorization header: %s", kooaba_auth_header);
+
+                free(calculated_kooaba_signature);
+              }
 
             } else {
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature does not match reference SCM signature");
             }
+
+            free(reference_scm_signature);
 
           } else {
             ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "cannot verify signature because of missing data");
@@ -297,6 +240,82 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
   }
 
   return NGX_DECLINED;
+}
+
+
+// Creates and returns a string containing the signature of the current request using the given secret token.
+u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
+{
+  u_char *request_signature = NULL;
+
+  // build the "string-to-sign" consisting of:
+  // - http verb..
+  ngx_str_t *method_name_str = &r->method_name;
+
+  // - MD5 of request body...
+  ngx_str_t *content_md5_str = get_request_header_str(r, "Content-MD5");
+  if (!content_md5_str) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Content-MD5 header missing");
+  }
+
+  // - content type..
+  ngx_str_t *content_type_str;
+
+  ngx_str_t full_content_type = ngx_null_string;
+  if (r->headers_in.content_type) {
+    full_content_type = r->headers_in.content_type->value;
+  } else {
+    ngx_table_elt_t *content_type_header = get_request_header(r, "Content-Type");
+    if (content_type_header) { full_content_type = content_type_header->value; }
+  }
+
+  // strip away any additional info in the Content-Type header
+  // e.g. "multipart/form-data; boundary=xyz" becomes "multipart/form-data"
+  if (full_content_type.len > 0) {
+    for (int i = 0; i < full_content_type.len; i++) {
+      if(full_content_type.data[i] == ';') {
+        full_content_type.len = i;
+        break;
+      }
+    }
+    if (full_content_type.len > 0) {
+      content_type_str = &full_content_type;
+    }
+  }
+  if (!content_type_str) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Content-Type header missing");
+  }
+
+  // - date...
+  ngx_str_t *date_str = get_request_header_str(r, "Date");
+  if (!content_md5_str) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Date header missing");
+  }
+
+  // - request path...
+  ngx_str_t *path_str = &r->uri;
+
+  if (method_name_str && content_md5_str && content_type_str && date_str && path_str) {
+
+    // ... joined by newlines
+    u_int string_to_sign_len = method_name_str->len + 1 + content_md5_str->len + 1 + content_type_str->len + 1 + date_str->len + 1 + path_str->len;
+    u_char *string_to_sign = malloc(string_to_sign_len + 1);
+    sprintf(string_to_sign, "%.*s\n%.*s\n%.*s\n%.*s\n%.*s", method_name_str->len, method_name_str->data,
+                                                            content_md5_str->len, content_md5_str->data,
+                                                            content_type_str->len, content_type_str->data,
+                                                            date_str->len, date_str->data,
+                                                            path_str->len, path_str->data);
+
+    // build the signature (base64-encoded SHA1-HMAC)
+    size_t macLen;
+    u_char mac[20];
+    HMAC(EVP_sha1(), secret_token->data, secret_token->len, string_to_sign, string_to_sign_len, mac, &macLen);
+    request_signature = encode_base64(mac, macLen);
+
+    free(string_to_sign);
+  }
+
+  return request_signature;
 }
 
 
