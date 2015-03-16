@@ -143,7 +143,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
     if (is_scm_auth_header) {
 
       // split Authorization header into access key and signature
-      u_char *scm_access_key, *scm_signature;
+      u_char *scm_access_key = NULL, *scm_signature = NULL;
 
       u_int key_and_signature_len = auth_header_str->len - strlen(SCM_AUTH_HEADER_PREFIX);
       u_char key_and_signature[key_and_signature_len + 1];
@@ -166,7 +166,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
         ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header (SCM access key: %s, SCM signature: %s)", scm_access_key, scm_signature);
 
         // fetch rewrite rule for access key
-        scm_auth_rewrite_rule_t *rewrite_rule;
+        scm_auth_rewrite_rule_t *rewrite_rule = NULL;
 
         scm_auth_rewrite_rule_t *rules = loc_conf->rewrite_rules->elts;
         for (int i = 0; i < loc_conf->rewrite_rules->nelts; i++) {
@@ -259,7 +259,7 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
   }
 
   // - content type..
-  ngx_str_t *content_type_str;
+  ngx_str_t *content_type_str = NULL;
 
   ngx_str_t full_content_type = ngx_null_string;
   if (r->headers_in.content_type) {
