@@ -288,7 +288,7 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 
   // - date...
   ngx_str_t *date_str = get_request_header_str(r, "Date");
-  if (!content_md5_str) {
+  if (!date_str) {
     ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Date header missing");
   }
 
