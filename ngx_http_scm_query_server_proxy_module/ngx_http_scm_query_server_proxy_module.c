@@ -204,7 +204,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
                 u_char *kooaba_auth_header = ngx_palloc(r->pool, kooaba_auth_header_len + 1);
                 if (!kooaba_auth_header) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
 
-                sprintf(kooaba_auth_header, "%s%.*s%c%s", KOOABA_AUTH_HEADER_PREFIX, rewrite_rule->kooaba_access_key.len, rewrite_rule->kooaba_access_key.data, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
+                ngx_sprintf(kooaba_auth_header, "%s%V%c%s", KOOABA_AUTH_HEADER_PREFIX, &rewrite_rule->kooaba_access_key, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
                 ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
                 authorization_header->lowcase_key = "authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
@@ -300,11 +300,7 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
     u_int string_to_sign_len = method_name_str->len + 1 + content_md5_str->len + 1 + content_type_str->len + 1 + date_str->len + 1 + path_str->len;
     u_char *string_to_sign = ngx_palloc(r->pool, string_to_sign_len + 1);
     if (string_to_sign) {
-      sprintf(string_to_sign, "%.*s\n%.*s\n%.*s\n%.*s\n%.*s", method_name_str->len, method_name_str->data,
-                                                              content_md5_str->len, content_md5_str->data,
-                                                              content_type_str->len, content_type_str->data,
-                                                              date_str->len, date_str->data,
-                                                              path_str->len, path_str->data);
+      ngx_sprintf(string_to_sign, "%V\n%V\n%V\n%V\n%V", method_name_str, content_md5_str, content_type_str, date_str, path_str);
     }
 
     // build the signature (base64-encoded SHA1-HMAC)
