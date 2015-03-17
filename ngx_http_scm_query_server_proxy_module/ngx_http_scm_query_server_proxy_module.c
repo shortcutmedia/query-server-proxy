@@ -23,13 +23,13 @@ static char* ngx_http_scm_query_server_proxy_add_scm_auth_rewrite(ngx_conf_t *cf
 
 
 // "Model" functions
-u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token);
+ngx_str_t* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token);
 
 
 // Helper functions
 ngx_table_elt_t* get_request_header(ngx_http_request_t *r, const char *name);
 ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name);
-u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len);
+ngx_str_t* create_base64encoded_string(ngx_pool_t *pool, ngx_str_t *string);
 
 
 // Config file directives provided by this module
@@ -181,28 +181,28 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
           ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found auth rewrite rule: %s/%s => %s/%s", rewrite_rule->scm_access_key.data, rewrite_rule->scm_secret_token.data, rewrite_rule->kooaba_access_key.data, rewrite_rule->kooaba_secret_token.data);
 
           // build reference SCM signature
-          u_char *reference_scm_signature = create_request_signature(r, &rewrite_rule->scm_secret_token);
+          ngx_str_t *reference_scm_signature = create_request_signature(r, &rewrite_rule->scm_secret_token);
 
           if (reference_scm_signature) {
-            ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated reference SCM signature: %s", reference_scm_signature);
+            ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated reference SCM signature: %V", reference_scm_signature);
 
             // check if request signature matches
-            int scm_signature_matches = ngx_strcmp(scm_signature, reference_scm_signature) == 0;
+            int scm_signature_matches = ngx_strncmp(scm_signature, reference_scm_signature->data, reference_scm_signature->len) == 0;
             if (scm_signature_matches) {
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature matches reference SCM signature");
 
               // calculate kooaba signature
-              u_char *calculated_kooaba_signature = create_request_signature(r, &rewrite_rule->kooaba_secret_token);
+              ngx_str_t *calculated_kooaba_signature = create_request_signature(r, &rewrite_rule->kooaba_secret_token);
 
               if (calculated_kooaba_signature) {
-                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated kooaba signature: %s", calculated_kooaba_signature);
+                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated kooaba signature: %V", calculated_kooaba_signature);
 
                 // rewrite the Authorization header
-                u_int kooaba_auth_header_len = ngx_strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + ngx_strlen(calculated_kooaba_signature);
+                u_int kooaba_auth_header_len = ngx_strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + calculated_kooaba_signature->len;
                 u_char *kooaba_auth_header = ngx_palloc(r->pool, kooaba_auth_header_len + 1);
                 if (!kooaba_auth_header) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
 
-                ngx_sprintf(kooaba_auth_header, "%s%V%c%s", KOOABA_AUTH_HEADER_PREFIX, &rewrite_rule->kooaba_access_key, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
+                ngx_sprintf(kooaba_auth_header, "%s%V%c%V", KOOABA_AUTH_HEADER_PREFIX, &rewrite_rule->kooaba_access_key, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
                 ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
                 authorization_header->lowcase_key = (u_char *)"authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
@@ -241,9 +241,9 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 
 
 // Creates and returns a string containing the signature of the current request using the given secret token.
-u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
+ngx_str_t* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 {
-  u_char *request_signature = NULL;
+  ngx_str_t *request_signature = NULL;
 
   // build the "string-to-sign" consisting of:
   // - http verb..
@@ -303,9 +303,11 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 
     // build the signature (base64-encoded SHA1-HMAC)
     u_int macLen;
-    u_char mac[20];
-    HMAC(EVP_sha1(), secret_token->data, secret_token->len, string_to_sign, string_to_sign_len, mac, &macLen);
-    request_signature = create_base64encoded_string(r->pool, mac, macLen);
+    u_char macData[20];
+    HMAC(EVP_sha1(), secret_token->data, secret_token->len, string_to_sign, string_to_sign_len, macData, &macLen);
+
+    ngx_str_t mac = {macLen, macData};
+    request_signature = create_base64encoded_string(r->pool, &mac);
   }
 
   return request_signature;
@@ -472,11 +474,17 @@ ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name)
 
 
 // Returns a base64 encoded version of the parameter string.
-u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len)
+ngx_str_t* create_base64encoded_string(ngx_pool_t *pool, ngx_str_t *string)
 {
-  ngx_str_t src = {len, string};
-  ngx_str_t dst = {ngx_base64_encoded_length(src.len), ngx_palloc(pool, ngx_base64_encoded_length(src.len))};
-  ngx_encode_base64(&dst, &src);
 
-  return dst.data;
+  ngx_str_t *base64 = ngx_palloc(pool, sizeof(ngx_str_t));
+
+  if (base64) {
+    base64->len  = ngx_base64_encoded_length(string->len);
+    base64->data = ngx_palloc(pool, base64->len);
+
+    ngx_encode_base64(base64, string);
+  }
+
+  return base64;
 }
