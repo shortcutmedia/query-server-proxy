@@ -31,7 +31,7 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 // Helper functions
 ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name);
 ngx_str_t* get_request_header_str(ngx_http_request_t *r, u_char *name);
-u_char* encode_base64(u_char *string, u_int len);
+u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len);
 
 
 // Config file directives provided by this module
@@ -146,7 +146,9 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
       u_char *scm_access_key = NULL, *scm_signature = NULL;
 
       u_int key_and_signature_len = auth_header_str->len - strlen(SCM_AUTH_HEADER_PREFIX);
-      u_char key_and_signature[key_and_signature_len + 1];
+      u_char *key_and_signature = ngx_palloc(r->pool, key_and_signature_len + 1);
+      if (!key_and_signature) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
+
       key_and_signature[key_and_signature_len] = '\0';
       ngx_memcpy(key_and_signature, &(auth_header_str->data[strlen(SCM_AUTH_HEADER_PREFIX)]), key_and_signature_len);
 
@@ -199,8 +201,9 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 
                 // rewrite the Authorization header
                 u_int kooaba_auth_header_len = strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + strlen(calculated_kooaba_signature);
-                u_char *kooaba_auth_header = malloc(kooaba_auth_header_len + 1);
-                ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "allocated: %d at %d", kooaba_auth_header_len, kooaba_auth_header);
+                u_char *kooaba_auth_header = ngx_palloc(r->pool, kooaba_auth_header_len + 1);
+                if (!kooaba_auth_header) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
+
                 sprintf(kooaba_auth_header, "%s%.*s%c%s", KOOABA_AUTH_HEADER_PREFIX, rewrite_rule->kooaba_access_key.len, rewrite_rule->kooaba_access_key.data, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
                 ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
@@ -209,15 +212,11 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
                 authorization_header->value.len = kooaba_auth_header_len;
 
                 ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "rewrote the Authorization header: %s", kooaba_auth_header);
-
-                free(calculated_kooaba_signature);
               }
 
             } else {
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature does not match reference SCM signature");
             }
-
-            free(reference_scm_signature);
 
           } else {
             ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "cannot verify signature because of missing data");
@@ -299,20 +298,20 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 
     // ... joined by newlines
     u_int string_to_sign_len = method_name_str->len + 1 + content_md5_str->len + 1 + content_type_str->len + 1 + date_str->len + 1 + path_str->len;
-    u_char *string_to_sign = malloc(string_to_sign_len + 1);
-    sprintf(string_to_sign, "%.*s\n%.*s\n%.*s\n%.*s\n%.*s", method_name_str->len, method_name_str->data,
-                                                            content_md5_str->len, content_md5_str->data,
-                                                            content_type_str->len, content_type_str->data,
-                                                            date_str->len, date_str->data,
-                                                            path_str->len, path_str->data);
+    u_char *string_to_sign = ngx_palloc(r->pool, string_to_sign_len + 1);
+    if (string_to_sign) {
+      sprintf(string_to_sign, "%.*s\n%.*s\n%.*s\n%.*s\n%.*s", method_name_str->len, method_name_str->data,
+                                                              content_md5_str->len, content_md5_str->data,
+                                                              content_type_str->len, content_type_str->data,
+                                                              date_str->len, date_str->data,
+                                                              path_str->len, path_str->data);
+    }
 
     // build the signature (base64-encoded SHA1-HMAC)
     size_t macLen;
     u_char mac[20];
     HMAC(EVP_sha1(), secret_token->data, secret_token->len, string_to_sign, string_to_sign_len, mac, &macLen);
-    request_signature = encode_base64(mac, macLen);
-
-    free(string_to_sign);
+    request_signature = create_base64encoded_string(r->pool, mac, macLen);
   }
 
   return request_signature;
@@ -479,7 +478,7 @@ ngx_str_t* get_request_header_str(ngx_http_request_t *r, u_char *name)
 
 
 // Returns a base64 encoded version of the parameter string.
-u_char* encode_base64(u_char *string, u_int len)
+u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len)
 {
   BIO *b64, *bmem, *wbio;
   BUF_MEM *bptr;
@@ -487,21 +486,19 @@ u_char* encode_base64(u_char *string, u_int len)
   unsigned int siz;
 
   siz = ((len + 2) / 3) * 4 + 1;
-  buf = (char *)malloc(siz);
+  buf = (char *)ngx_palloc(pool, siz);
   if (buf == NULL) {
     return NULL;
   }
 
   b64 = BIO_new(BIO_f_base64());
   if (b64 == NULL) {
-    free(buf);
     return NULL;
   }
 
   bmem = BIO_new(BIO_s_mem());
   if (bmem == NULL) {
     BIO_free(b64);
-    free(buf);
     return NULL;
   }
 
