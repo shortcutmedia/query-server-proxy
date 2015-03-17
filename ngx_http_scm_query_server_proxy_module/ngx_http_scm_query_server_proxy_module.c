@@ -4,8 +4,6 @@
 #include <ngx_http.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
-#include <openssl/bio.h>
-#include <openssl/buffer.h>
 
 
 #define SCM_AUTH_HEADER_PREFIX "SCMA "
@@ -476,38 +474,9 @@ ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name)
 // Returns a base64 encoded version of the parameter string.
 u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len)
 {
-  BIO *b64, *bmem, *wbio;
-  BUF_MEM *bptr;
-  u_char *buf;
-  u_int siz;
+  ngx_str_t src = {len, string};
+  ngx_str_t dst = {ngx_base64_encoded_length(src.len), ngx_palloc(pool, ngx_base64_encoded_length(src.len))};
+  ngx_encode_base64(&dst, &src);
 
-  siz = ((len + 2) / 3) * 4 + 1;
-  buf = ngx_palloc(pool, siz);
-  if (buf == NULL) {
-    return NULL;
-  }
-
-  b64 = BIO_new(BIO_f_base64());
-  if (b64 == NULL) {
-    return NULL;
-  }
-
-  bmem = BIO_new(BIO_s_mem());
-  if (bmem == NULL) {
-    BIO_free(b64);
-    return NULL;
-  }
-
-  wbio = BIO_push(b64, bmem);
-  BIO_write(wbio, string, (int)len);
-  (void)BIO_flush(wbio);
-  BIO_get_mem_ptr(b64, &bptr);
-
-  memcpy(buf, bptr->data, bptr->length - 1);
-  buf[bptr->length - 1] = '\0';
-
-  BIO_free(b64);
-  BIO_free(bmem);
-
-  return buf;
+  return dst.data;
 }
