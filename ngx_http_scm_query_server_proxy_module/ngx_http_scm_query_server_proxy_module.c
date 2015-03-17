@@ -29,8 +29,8 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
 
 
 // Helper functions
-ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name);
-ngx_str_t* get_request_header_str(ngx_http_request_t *r, u_char *name);
+ngx_table_elt_t* get_request_header(ngx_http_request_t *r, const char *name);
+ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name);
 u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len);
 
 
@@ -139,18 +139,18 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
     ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Authorization header present: %s", auth_header_str->data);
 
     // check if Authorization header matches SCMA auth scheme
-    u_int is_scm_auth_header = ngx_strncmp(auth_header_str->data, SCM_AUTH_HEADER_PREFIX, strlen(SCM_AUTH_HEADER_PREFIX)) == 0;
+    u_int is_scm_auth_header = ngx_strncmp(auth_header_str->data, SCM_AUTH_HEADER_PREFIX, ngx_strlen(SCM_AUTH_HEADER_PREFIX)) == 0;
     if (is_scm_auth_header) {
 
       // split Authorization header into access key and signature
       u_char *scm_access_key = NULL, *scm_signature = NULL;
 
-      u_int key_and_signature_len = auth_header_str->len - strlen(SCM_AUTH_HEADER_PREFIX);
+      u_int key_and_signature_len = auth_header_str->len - ngx_strlen(SCM_AUTH_HEADER_PREFIX);
       u_char *key_and_signature = ngx_palloc(r->pool, key_and_signature_len + 1);
       if (!key_and_signature) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
 
       key_and_signature[key_and_signature_len] = '\0';
-      ngx_memcpy(key_and_signature, &(auth_header_str->data[strlen(SCM_AUTH_HEADER_PREFIX)]), key_and_signature_len);
+      ngx_memcpy(key_and_signature, &(auth_header_str->data[ngx_strlen(SCM_AUTH_HEADER_PREFIX)]), key_and_signature_len);
 
       u_int separator_pos = 0;
       for (int i = 1; i < key_and_signature_len - 1; i++) {
@@ -172,7 +172,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 
         scm_auth_rewrite_rule_t *rules = loc_conf->rewrite_rules->elts;
         for (int i = 0; i < loc_conf->rewrite_rules->nelts; i++) {
-          int rule_matches_scm_access_key = strncmp(rules[i].scm_access_key.data, scm_access_key, strlen(scm_access_key)) == 0;
+          int rule_matches_scm_access_key = ngx_strncmp(rules[i].scm_access_key.data, scm_access_key, ngx_strlen(scm_access_key)) == 0;
           if (rule_matches_scm_access_key) {
             rewrite_rule = &rules[i];
             break;
@@ -189,7 +189,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
             ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated reference SCM signature: %s", reference_scm_signature);
 
             // check if request signature matches
-            int scm_signature_matches = strcmp(scm_signature, reference_scm_signature) == 0;
+            int scm_signature_matches = ngx_strcmp(scm_signature, reference_scm_signature) == 0;
             if (scm_signature_matches) {
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature matches reference SCM signature");
 
@@ -200,14 +200,14 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
                 ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated kooaba signature: %s", calculated_kooaba_signature);
 
                 // rewrite the Authorization header
-                u_int kooaba_auth_header_len = strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + strlen(calculated_kooaba_signature);
+                u_int kooaba_auth_header_len = ngx_strlen(KOOABA_AUTH_HEADER_PREFIX) + rewrite_rule->kooaba_access_key.len + AUTH_HEADER_SEPARATOR_LEN + ngx_strlen(calculated_kooaba_signature);
                 u_char *kooaba_auth_header = ngx_palloc(r->pool, kooaba_auth_header_len + 1);
                 if (!kooaba_auth_header) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
 
                 ngx_sprintf(kooaba_auth_header, "%s%V%c%s", KOOABA_AUTH_HEADER_PREFIX, &rewrite_rule->kooaba_access_key, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
                 ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
-                authorization_header->lowcase_key = "authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
+                authorization_header->lowcase_key = (u_char *)"authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
                 authorization_header->value.data = kooaba_auth_header;
                 authorization_header->value.len = kooaba_auth_header_len;
 
@@ -304,7 +304,7 @@ u_char* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_token)
     }
 
     // build the signature (base64-encoded SHA1-HMAC)
-    size_t macLen;
+    u_int macLen;
     u_char mac[20];
     HMAC(EVP_sha1(), secret_token->data, secret_token->len, string_to_sign, string_to_sign_len, mac, &macLen);
     request_signature = create_base64encoded_string(r->pool, mac, macLen);
@@ -362,14 +362,14 @@ static char* ngx_http_scm_query_server_proxy_add_scm_auth_rewrite(ngx_conf_t *cf
 // Returns a request header, if present.
 //
 // Taken from http://wiki.nginx.org/HeadersManagement#Get_a_header_value
-ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name)
+ngx_table_elt_t* get_request_header(ngx_http_request_t *r, const char *name)
 {
   ngx_http_core_main_conf_t  *cmcf;
   ngx_http_header_t          *hh;
   u_char                     *lowcase_key;
   ngx_uint_t                  i, hash;
 
-  size_t len = strlen(name);
+  u_int len = ngx_strlen(name);
 
   /*
   Header names are case-insensitive, so have been hashed by lowercases key
@@ -441,7 +441,7 @@ ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name)
     /*
     Just compare the lengths and then the names case insensitively.
     */
-    if (len != h[i].key.len || ngx_strcasecmp(name, h[i].key.data) != 0) {
+    if (len != h[i].key.len || ngx_strcasecmp((u_char *)name, h[i].key.data) != 0) {
       /* This header doesn't match. */
       continue;
     }
@@ -462,7 +462,7 @@ ngx_table_elt_t* get_request_header(ngx_http_request_t *r, u_char *name)
 
 
 // Returns the value of a request header, if present.
-ngx_str_t* get_request_header_str(ngx_http_request_t *r, u_char *name)
+ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name)
 {
   ngx_table_elt_t *header = get_request_header(r, name);
   if (header) {
@@ -478,11 +478,11 @@ u_char* create_base64encoded_string(ngx_pool_t *pool, u_char *string, u_int len)
 {
   BIO *b64, *bmem, *wbio;
   BUF_MEM *bptr;
-  char *buf;
-  unsigned int siz;
+  u_char *buf;
+  u_int siz;
 
   siz = ((len + 2) / 3) * 4 + 1;
-  buf = (char *)ngx_palloc(pool, siz);
+  buf = ngx_palloc(pool, siz);
   if (buf == NULL) {
     return NULL;
   }
