@@ -18,8 +18,12 @@ task :build do
   sh 'script/build.sh'
 end
 
+NGINX_PIDFILE = File.join File.dirname(__FILE__), 'build/nginx/logs/nginx.pid'
+
 desc "Starts nginx"
 task :start do
+  raise 'Already running' if File.exist?(NGINX_PIDFILE)
+
   args = []
   args << "-c #{ENV['CONFIGFILE']}" if ENV['CONFIGFILE']
   `build/nginx/sbin/nginx #{args.join ' '}`
@@ -28,7 +32,7 @@ end
 
 desc "Stops nginx"
 task :stop do
-  `build/nginx/sbin/nginx -s stop`
+  `build/nginx/sbin/nginx -s stop` if File.exist?(NGINX_PIDFILE)
 end
 
 desc "Restarts nginx"
