@@ -37,3 +37,11 @@ end
 
 desc "Restarts nginx"
 task :restart => [:stop, :start]
+
+desc "Runs all tests in ./test/*_test.rb"
+task :test do
+  $: << 'test'
+  Dir[File.join(File.dirname(__FILE__), 'test/*_test.rb')].each do |test_file|
+    load test_file
+  end
+end
