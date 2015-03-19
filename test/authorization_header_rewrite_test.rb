@@ -51,13 +51,20 @@ class AuthorizationHeaderRewriteTest < Minitest::Spec
   end
 
   it 'must not rewrite invalid Authorization headers' do
-    auth_header_in = "SCMA #{SCM_ACCESS_KEY}:invalid_signature"
-
-    auth_header_out = rewritten_authorization_header_for_request_with verb, uri, 'Content-MD5'   => content_md5,
-                                                                                 'Content-Type'  => content_type,
-                                                                                 'Date'          => date,
-                                                                                 'Authorization' => auth_header_in
-    auth_header_out.must_equal auth_header_in
+    [
+      "SCMA #{SCM_ACCESS_KEY}:invalid_signature",
+      "SCMA #{SCM_ACCESS_KEY}",
+      "SCMA #{SCM_ACCESS_KEY}:",
+      "SCMA :foo",
+      "SCMA :",
+      "SCMA foo:bar:baz"
+    ].each do |auth_header_in|
+      auth_header_out = rewritten_authorization_header_for_request_with verb, uri, 'Content-MD5'   => content_md5,
+                                                                                   'Content-Type'  => content_type,
+                                                                                   'Date'          => date,
+                                                                                   'Authorization' => auth_header_in
+      auth_header_out.must_equal auth_header_in
+    end
   end
 
   it 'must not rewrite Authorization headers when missing required headers' do

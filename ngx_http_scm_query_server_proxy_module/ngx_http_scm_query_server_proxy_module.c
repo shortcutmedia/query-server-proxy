@@ -142,37 +142,40 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
     u_int is_scm_auth_header = ngx_strncmp(auth_header_str->data, SCM_AUTH_HEADER_PREFIX, ngx_strlen(SCM_AUTH_HEADER_PREFIX)) == 0;
     if (is_scm_auth_header) {
 
-      // split Authorization header into access key and signature
-      u_char *scm_access_key = NULL, *scm_signature = NULL;
+      // get access key and signature from Authorization header
+      //
+      // Authorization header is structured as follows:
+      // SCM_AUTH_HEADER_PREFIX + access_key + AUTH_HEADER_SEPARATOR_CHAR + signature, e.g. "SCMA access_key:signature"
+      ngx_str_t *scm_access_key = NULL, *scm_signature = NULL;
 
-      u_int key_and_signature_len = auth_header_str->len - ngx_strlen(SCM_AUTH_HEADER_PREFIX);
-      u_char *key_and_signature = ngx_palloc(r->pool, key_and_signature_len + 1);
-      if (!key_and_signature) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
+      u_int access_key_start_pos = ngx_strlen(SCM_AUTH_HEADER_PREFIX), access_key_len, signature_start_pos, signature_len;
+      for (int i = access_key_start_pos + 1; i < auth_header_str->len - 1; i++) {
+        if (auth_header_str->data[i] == AUTH_HEADER_SEPARATOR_CHAR) {
+          access_key_len      = i - access_key_start_pos;
+          signature_start_pos = i + 1;
+          signature_len       = auth_header_str->len - signature_start_pos;
 
-      key_and_signature[key_and_signature_len] = '\0';
-      ngx_memcpy(key_and_signature, &(auth_header_str->data[ngx_strlen(SCM_AUTH_HEADER_PREFIX)]), key_and_signature_len);
+          scm_access_key = ngx_palloc(r->pool, sizeof(ngx_str_t));
+          scm_access_key->len  = access_key_len;
+          scm_access_key->data = &auth_header_str->data[access_key_start_pos];
 
-      u_int separator_pos = 0;
-      for (int i = 1; i < key_and_signature_len - 1; i++) {
-        if (key_and_signature[i] == AUTH_HEADER_SEPARATOR_CHAR) {
-          separator_pos = i;
+          scm_signature = ngx_palloc(r->pool, sizeof(ngx_str_t));
+          scm_signature->len  = signature_len;
+          scm_signature->data = &auth_header_str->data[signature_start_pos];
+
+          break;
         }
-      }
-      if (separator_pos) {
-        key_and_signature[separator_pos] = '\0';
-        scm_access_key = &key_and_signature[0];
-        scm_signature = &key_and_signature[separator_pos + 1];
       }
 
       if (scm_access_key && scm_signature) {
-        ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header (SCM access key: %s, SCM signature: %s)", scm_access_key, scm_signature);
+        ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header (SCM access key: %V (%d), SCM signature: %V (%d))", scm_access_key, scm_access_key->len, scm_signature, scm_signature->len);
 
         // fetch rewrite rule for access key
         scm_auth_rewrite_rule_t *rewrite_rule = NULL;
 
         scm_auth_rewrite_rule_t *rules = loc_conf->rewrite_rules->elts;
         for (int i = 0; i < loc_conf->rewrite_rules->nelts; i++) {
-          int rule_matches_scm_access_key = ngx_strncmp(rules[i].scm_access_key.data, scm_access_key, ngx_strlen(scm_access_key)) == 0;
+          int rule_matches_scm_access_key = ngx_strncmp(rules[i].scm_access_key.data, scm_access_key->data, scm_access_key->len) == 0;
           if (rule_matches_scm_access_key) {
             rewrite_rule = &rules[i];
             break;
@@ -189,7 +192,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
             ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "calculated reference SCM signature: %V", reference_scm_signature);
 
             // check if request signature matches
-            int scm_signature_matches = ngx_strncmp(scm_signature, reference_scm_signature->data, reference_scm_signature->len) == 0;
+            int scm_signature_matches = ngx_strncmp(scm_signature->data, reference_scm_signature->data, reference_scm_signature->len) == 0;
             if (scm_signature_matches) {
               ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "request signature matches reference SCM signature");
 
