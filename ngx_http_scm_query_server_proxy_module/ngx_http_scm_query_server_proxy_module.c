@@ -134,7 +134,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
   // read Authorization header
   ngx_str_t *auth_header_str = get_request_header_str(r, "Authorization");
   if (auth_header_str) {
-    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Authorization header present: %s", auth_header_str->data);
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Authorization header present: %V", auth_header_str);
 
     // check if Authorization header matches SCMA auth scheme
     u_int is_scm_auth_header = ngx_strncmp(auth_header_str->data, SCM_AUTH_HEADER_PREFIX, ngx_strlen(SCM_AUTH_HEADER_PREFIX)) == 0;
@@ -178,7 +178,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
         }
 
         if (rewrite_rule) {
-          ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found auth rewrite rule: %s/%s => %s/%s", rewrite_rule->scm_access_key.data, rewrite_rule->scm_secret_token.data, rewrite_rule->kooaba_access_key.data, rewrite_rule->kooaba_secret_token.data);
+          ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found auth rewrite rule: %V/%V => %V/%V", &rewrite_rule->scm_access_key, &rewrite_rule->scm_secret_token, &rewrite_rule->kooaba_access_key, &rewrite_rule->kooaba_secret_token);
 
           // build reference SCM signature
           ngx_str_t *reference_scm_signature = create_request_signature(r, &rewrite_rule->scm_secret_token);
