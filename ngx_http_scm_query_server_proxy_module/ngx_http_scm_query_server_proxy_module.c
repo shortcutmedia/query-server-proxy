@@ -132,8 +132,10 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
   }
 
   // read Authorization header
-  ngx_str_t *auth_header_str = get_request_header_str(r, "Authorization");
-  if (auth_header_str) {
+  ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
+  if (authorization_header) {
+    ngx_str_t *auth_header_str = &authorization_header->value;
+
     ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "Authorization header present: %V", auth_header_str);
 
     // check if Authorization header matches SCMA auth scheme
@@ -204,7 +206,6 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 
                 ngx_sprintf(kooaba_auth_header, "%s%V%c%V", KOOABA_AUTH_HEADER_PREFIX, &rewrite_rule->kooaba_access_key, AUTH_HEADER_SEPARATOR_CHAR, calculated_kooaba_signature);
 
-                ngx_table_elt_t *authorization_header = get_request_header(r, "Authorization");
                 authorization_header->lowcase_key = (u_char *)"authorization"; // see last section on http://wiki.nginx.org/HeadersManagement
                 authorization_header->value.data = kooaba_auth_header;
                 authorization_header->value.len = kooaba_auth_header_len;
