@@ -1,5 +1,11 @@
 require 'minitest/autorun'
+
 require 'faraday'
+require 'digest/md5'
+require 'openssl'
+require 'base64'
+require 'date'
+require 'json'
 
 class BackgroundProcess
   attr_reader :command, :args

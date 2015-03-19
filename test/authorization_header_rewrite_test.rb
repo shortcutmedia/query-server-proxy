@@ -1,10 +1,6 @@
 require 'test_helper'
 
-require 'openssl'
-require 'base64'
-require 'date'
-
-describe "Authorization header rewrite" do
+class AuthorizationHeaderRewriteTest < Minitest::Spec
 
   # must match the values in the nginx config file
   SCM_ACCESS_KEY      = '123'
