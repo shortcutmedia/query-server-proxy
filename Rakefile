@@ -33,6 +33,7 @@ end
 desc "Stops nginx"
 task :stop do
   `build/nginx/sbin/nginx -s stop` if File.exist?(NGINX_PIDFILE)
+  sleep 1
 end
 
 desc "Restarts nginx"
