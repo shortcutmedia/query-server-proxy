@@ -27,7 +27,6 @@ describe "Authorization header rewrite" do
   let(:content_md5)  { '1234567890abcdef' }
   let(:content_type) { 'multipart/form-data' }
   let(:date)         { DateTime.now.rfc822 }
-  #let(:date)         { 'Wed, 18 Mar 2015 16:19:29 +0100' }
   let(:uri)          { '/' }
 
   let(:digest) { "#{verb}\n#{content_md5}\n#{content_type}\n#{date}\n#{uri}" }
@@ -45,6 +44,16 @@ describe "Authorization header rewrite" do
     auth_header_out.must_equal "KA #{KOOABA_ACCESS_KEY}:#{kooaba_signature}"
   end
 
+  it 'must work with complex Content-Type headers' do
+    auth_header_in = "SCMA #{SCM_ACCESS_KEY}:#{scm_signature}"
+
+    auth_header_out = rewritten_authorization_header_for_request_with verb, uri, 'Content-MD5'   => content_md5,
+                                                                                 'Content-Type'  => "#{content_type}; boundary=123456",
+                                                                                 'Date'          => date,
+                                                                                 'Authorization' => auth_header_in
+    auth_header_out.must_equal "KA #{KOOABA_ACCESS_KEY}:#{kooaba_signature}"
+  end
+
   it 'must not rewrite invalid Authorization headers' do
     auth_header_in = "SCMA #{SCM_ACCESS_KEY}:invalid_signature"
 
@@ -55,7 +64,7 @@ describe "Authorization header rewrite" do
     auth_header_out.must_equal auth_header_in
   end
 
-  it 'must rewrite Authorization headers when missing required headers' do
+  it 'must not rewrite Authorization headers when missing required headers' do
     auth_header_in = "SCMA #{SCM_ACCESS_KEY}:#{scm_signature}"
 
     auth_header_out = rewritten_authorization_header_for_request_with verb, uri, 'Authorization' => auth_header_in
