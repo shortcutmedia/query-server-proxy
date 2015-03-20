@@ -168,7 +168,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
       }
 
       if (scm_access_key && scm_signature) {
-        ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header (SCM access key: %V (%d), SCM signature: %V (%d))", scm_access_key, scm_access_key->len, scm_signature, scm_signature->len);
+        ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header into SCM access key: %V, SCM signature: %V", scm_access_key, scm_signature);
 
         // fetch rewrite rule for access key
         scm_auth_rewrite_rule_t *rewrite_rule = NULL;
