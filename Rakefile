@@ -1,22 +1,25 @@
 require 'rake'
 
+NGINX_VERSION = '1.7.11'
+
 desc 'Bootstraps the local development environment'
 task :bootstrap do
-  sh 'script/bootstrap.sh'
+  sh "NGINX_VERSION=#{NGINX_VERSION} script/bootstrap.sh"
 end
 
 namespace :configure do
 
   desc 'Configures nginx build for development'
   task :development do
-    sh 'script/configure_build_dev.sh'
+    sh "NGINX_VERSION=#{NGINX_VERSION} script/configure_build_dev.sh"
   end
 end
 
 desc 'Builds nginx'
 task :build do
-  sh 'script/build.sh'
+  sh "NGINX_VERSION=#{NGINX_VERSION} script/build.sh"
 end
+
 
 NGINX_PIDFILE = File.join File.dirname(__FILE__), 'build/nginx/logs/nginx.pid'
 
