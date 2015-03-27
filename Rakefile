@@ -1,5 +1,11 @@
 require 'rake'
 
+NGINX_ENV = ENV['NGINX_ENV'] ||= 'development'
+
+
+###############################################################################
+# Building
+
 NGINX_VERSION = '1.7.11'
 
 desc 'Bootstraps the local development environment'
@@ -7,12 +13,9 @@ task :bootstrap do
   sh "NGINX_VERSION=#{NGINX_VERSION} script/bootstrap.sh"
 end
 
-namespace :configure do
-
-  desc 'Configures nginx build for development'
-  task :development do
-    sh "NGINX_VERSION=#{NGINX_VERSION} script/configure_build_dev.sh"
-  end
+desc 'Configures nginx build'
+task :configure do
+  sh "NGINX_VERSION=#{NGINX_VERSION} script/configure_build.sh"
 end
 
 desc 'Builds nginx'
@@ -21,15 +24,18 @@ task :build do
 end
 
 
-NGINX_PIDFILE = File.join File.dirname(__FILE__), 'build/nginx/logs/nginx.pid'
+
+###############################################################################
+# Running
+
+NGINX_PIDFILE   = File.join File.dirname(__FILE__), 'build/nginx/logs/nginx.pid'
+NGINX_CONF_FILE = File.join File.dirname(__FILE__), "config/nginx_#{ENV['NGINX_ENV']}.conf"
 
 desc "Starts nginx"
 task :start do
   raise 'Already running' if File.exist?(NGINX_PIDFILE)
 
-  args = []
-  args << "-c #{ENV['CONFIGFILE']}" if ENV['CONFIGFILE']
-  `build/nginx/sbin/nginx #{args.join ' '}`
+  `build/nginx/sbin/nginx -c #{NGINX_CONF_FILE}`
   sleep 1
 end
 
@@ -41,6 +47,11 @@ end
 
 desc "Restarts nginx"
 task :restart => [:stop, :start]
+
+
+
+###############################################################################
+# Tests
 
 desc "Runs all tests in ./test/*_test.rb"
 task :test do

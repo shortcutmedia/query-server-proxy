@@ -7,16 +7,29 @@ if [ ! -n "${NGINX_VERSION:+x}" ]; then
     exit 1
 fi
 
-printf "Configuring nginx v$NGINX_VERSION build for development...\n"
+if [ ! -n "${NGINX_ENV:+x}" ]; then
+    echo "You must set NGINX_ENV env var"
+    exit 1
+fi
 
+printf "Configuring nginx v$NGINX_VERSION build for $NGINX_ENV...\n"
 
 if [ ! -d "vendor/nginx-$NGINX_VERSION" ]; then
     echo "vendor/nginx-$NGINX_VERSION not found. You must bootstrap first..."
     exit 1
 fi
 
+if [ "$NGINX_ENV" == "development" ]; then
+  CFLAGS="-g -O0 -Wall -std=c99"
+elif [ "$NGINX_ENV" == "production" ]; then
+  CFLAGS="-O -Wall -std=c99"
+else
+  echo "Unknown NGINX_ENV: $NGINX_ENV..."
+  exit 1
+fi
+
 pushd "vendor/nginx-$NGINX_VERSION"
-CFLAGS="-g -O0 -Wall -std=c99" ./configure \
+CFLAGS="$CFLAGS" ./configure \
     --with-debug                           \
     --prefix=$(pwd)/../../build/nginx      \
     --conf-path=conf/nginx.conf            \
