@@ -55,13 +55,13 @@ class Nginx
 
     return if instances[config_file] && instances[config_file].running?
 
-    instances[config_file] = BackgroundProcess.new File.join(File.dirname(__FILE__), '../build/nginx/sbin/nginx'), '-c', config_file
+    instances[config_file] = BackgroundProcess.new File.join(File.dirname(__FILE__), '../build/nginx-query-server-proxy/bin/nginx-query-server-proxy'), '-c', config_file
     instances[config_file].start
 
     if instances[config_file].running?
       at_exit { instances[config_file].stop }
     else
-      raise 'could not start Nginx'
+      raise 'could not start nginx-query-server-proxy'
     end
   end
 

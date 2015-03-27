@@ -30,10 +30,12 @@ fi
 
 pushd "vendor/nginx-$NGINX_VERSION"
 CFLAGS="$CFLAGS" ./configure \
-    --with-debug                           \
-    --prefix=$(pwd)/../../build/nginx      \
-    --conf-path=conf/nginx.conf            \
-    --error-log-path=logs/error.log        \
-    --http-log-path=logs/access.log        \
+    --with-debug                                         \
+    --prefix=$(pwd)/../../build/nginx-query-server-proxy \
+    --sbin-path=bin/nginx-query-server-proxy             \
+    --pid-path=logs/nginx-query-server-proxy.pid         \
+    --conf-path=conf/nginx-query-server-proxy.conf       \
+    --error-log-path=logs/error.log                      \
+    --http-log-path=logs/access.log                      \
     --add-module=../../ngx_http_scm_query_server_proxy_module
 popd

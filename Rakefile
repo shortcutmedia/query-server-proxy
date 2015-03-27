@@ -28,20 +28,20 @@ end
 ###############################################################################
 # Running
 
-NGINX_PIDFILE   = File.join File.dirname(__FILE__), 'build/nginx/logs/nginx.pid'
-NGINX_CONF_FILE = File.join File.dirname(__FILE__), "config/nginx_#{ENV['NGINX_ENV']}.conf"
+NGINX_PIDFILE   = File.join File.dirname(__FILE__), 'build/nginx-query-server-proxy/logs/nginx-query-server-proxy.pid'
+NGINX_CONF_FILE = File.join File.dirname(__FILE__), "config/#{ENV['NGINX_ENV']}.conf"
 
 desc "Starts nginx"
 task :start do
   raise 'Already running' if File.exist?(NGINX_PIDFILE)
 
-  `build/nginx/sbin/nginx -c #{NGINX_CONF_FILE}`
+  `build/nginx-query-server-proxy/bin/nginx-query-server-proxy -c #{NGINX_CONF_FILE}`
   sleep 1
 end
 
 desc "Stops nginx"
 task :stop do
-  `build/nginx/sbin/nginx -s stop` if File.exist?(NGINX_PIDFILE)
+  `build/nginx-query-server-proxy/bin/nginx-query-server-proxy -s stop` if File.exist?(NGINX_PIDFILE)
   sleep 1
 end
 

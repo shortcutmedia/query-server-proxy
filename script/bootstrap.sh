@@ -6,7 +6,7 @@ set -o errexit
 
 DIR=$(pwd)
 BUILDDIR=$DIR/build
-NGINX_DIR=nginx
+NGINX_DIR=nginx-query-server-proxy
 
 setup_local_directories () {
     if [ ! -d $BUILDDIR ]; then
