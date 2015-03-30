@@ -2,6 +2,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <ngx_log.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 
@@ -11,11 +12,16 @@
 #define AUTH_HEADER_SEPARATOR_CHAR ':'
 #define AUTH_HEADER_SEPARATOR_LEN 1
 
+#define QUERY_LOG_FILE "logs/queries.log"
+#define QUERY_LOG_SEPARATOR " - "
+#define QUERY_LOG_SUFFIX "\n"
+
 
 // Module callbacks
 static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf);
 static void* ngx_http_scm_query_server_proxy_create_loc_conf(ngx_conf_t *cf);
-static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r);
+static ngx_int_t ngx_http_scm_query_server_proxy_access_handler(ngx_http_request_t *r);
+static ngx_int_t ngx_http_scm_query_server_proxy_log_handler(ngx_http_request_t *r);
 
 
 // Config file reader
@@ -30,6 +36,7 @@ ngx_str_t* create_request_signature(ngx_http_request_t *r, ngx_str_t *secret_tok
 ngx_table_elt_t* get_request_header(ngx_http_request_t *r, const char *name);
 ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name);
 ngx_str_t* create_base64encoded_string(ngx_pool_t *pool, ngx_str_t *string);
+ngx_log_t *ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name);
 
 
 // Config file directives provided by this module
@@ -89,33 +96,40 @@ typedef struct {
 // This struct stores the module's config for a location
 typedef struct {
   ngx_array_t *rewrite_rules; // of type scm_auth_rewrite_rule_t
+  ngx_log_t *query_log;
 } ngx_http_scm_query_server_proxy_loc_conf_t;
 
 
 // Init callback. Called when the server starts up.
 //
 // This function sets up the module's callbacks:
-// - ngx_http_scm_query_server_proxy_handler is called for every request in the ACCESS phase
+// - ngx_http_scm_query_server_proxy_access_handler is called for every request in the ACCESS phase
+// - ngx_http_scm_query_server_proxy_log_handler is called for every request in the LOG phase
 static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf)
 {
-  ngx_http_handler_pt *h;
+  ngx_http_handler_pt *ah, *lh;
   ngx_http_core_main_conf_t *cmcf;
 
   cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 
-  h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
-  if (h == NULL) {
+  ah = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
+  if (ah == NULL) {
     return NGX_ERROR;
   }
+  *ah = ngx_http_scm_query_server_proxy_access_handler;
 
-  *h = ngx_http_scm_query_server_proxy_handler;
+  lh = ngx_array_push(&cmcf->phases[NGX_HTTP_LOG_PHASE].handlers);
+  if (lh == NULL) {
+    return NGX_ERROR;
+  }
+  *lh = ngx_http_scm_query_server_proxy_log_handler;
 
   return NGX_OK;
 }
 
 
 // Per-request callback. Called for every request in the ACCESS phase
-static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
+static ngx_int_t ngx_http_scm_query_server_proxy_access_handler(ngx_http_request_t *r)
 {
   ngx_http_scm_query_server_proxy_loc_conf_t *loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_scm_query_server_proxy_module);
 
@@ -169,6 +183,13 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
 
       if (scm_access_key && scm_signature) {
         ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header into SCM access key: %V, SCM signature: %V", scm_access_key, scm_signature);
+
+        // store access key for logging, see ngx_http_scm_query_server_proxy_log_handler
+        ngx_table_elt_t *access_key_header;
+        access_key_header = ngx_list_push(&r->headers_in.headers);
+        access_key_header->hash = 1;
+        ngx_str_set(&access_key_header->key, "X-SCM-Access-Key");
+        access_key_header->value = *scm_access_key;
 
         // fetch rewrite rule for access key
         scm_auth_rewrite_rule_t *rewrite_rule = NULL;
@@ -241,6 +262,56 @@ static ngx_int_t ngx_http_scm_query_server_proxy_handler(ngx_http_request_t *r)
   }
 
   return NGX_DECLINED;
+}
+
+
+// Per-request callback. Called for every request in the LOG phase
+static ngx_int_t ngx_http_scm_query_server_proxy_log_handler(ngx_http_request_t *r)
+{
+  ngx_http_scm_query_server_proxy_loc_conf_t *loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_scm_query_server_proxy_module);
+
+  // abort if there is no query log
+  if (!loc_conf->query_log) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "no query log present");
+    return NGX_OK;
+  }
+
+  // read X-SCM-Access-Key header
+  ngx_str_t *access_key_header_str = get_request_header_str(r, "X-SCM-Access-Key");
+  if (access_key_header_str) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "X-SCM-Access-Key header present: %V", access_key_header_str);
+
+    // build log entry
+    //
+    // a log line is structured as follows:
+    // remote_address + QUERY_LOG_SEPARATOR + TIMESTAMP + QUERY_LOG_SEPARATOR + access_key + QUERY_LOG_SUFFIX,
+    // e.g. "remote_addr - timestamp - access_key\n"
+    u_int line_len = r->connection->addr_text.len      + ngx_strlen(QUERY_LOG_SEPARATOR)
+                     + ngx_cached_http_log_iso8601.len + ngx_strlen(QUERY_LOG_SEPARATOR)
+                     + access_key_header_str->len      + ngx_strlen(QUERY_LOG_SUFFIX);
+    u_char *line = ngx_palloc(r->pool, line_len + 1);
+    if (!line) { return NGX_ERROR; }
+
+    ngx_sprintf(line, "%V%s%V%s%V%s", &r->connection->addr_text, QUERY_LOG_SEPARATOR,
+                                      &ngx_cached_http_log_iso8601, QUERY_LOG_SEPARATOR,
+                                      access_key_header_str, QUERY_LOG_SUFFIX);
+
+    // write to log file
+    u_int written = ngx_write_fd(loc_conf->query_log->file->fd, line, line_len);
+
+    if (written == line_len) {
+      ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "wrote %d/%d bytes to %V", written, line_len, &loc_conf->query_log->file->name);
+
+    } else {
+      ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0, "could not write \"%s\" (%d bytes) to %V: %d bytes written", line, line_len, &loc_conf->query_log->file->name, written);
+      return NGX_ERROR;
+    }
+
+  } else {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "no X-SCM-Access-Key header found");
+  }
+
+  return NGX_OK;
 }
 
 
@@ -327,6 +398,12 @@ static void* ngx_http_scm_query_server_proxy_create_loc_conf(ngx_conf_t *cf)
 
   conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_scm_query_server_proxy_loc_conf_t));
   if (conf == NULL) {
+    return NGX_CONF_ERROR;
+  }
+
+  ngx_str_t query_log_name = ngx_string(QUERY_LOG_FILE);
+  conf->query_log = ngx_log_create(cf->cycle, &query_log_name);
+  if (conf->query_log == NULL) {
     return NGX_CONF_ERROR;
   }
 
@@ -491,4 +568,25 @@ ngx_str_t* create_base64encoded_string(ngx_pool_t *pool, ngx_str_t *string)
   }
 
   return base64;
+}
+
+
+// Returns a log set up with a backing file.
+//
+// This function is ported over from nginx v1.4.7.
+ngx_log_t *ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name)
+{
+  ngx_log_t  *log;
+
+  log = ngx_pcalloc(cycle->pool, sizeof(ngx_log_t));
+  if (log == NULL) {
+    return NULL;
+  }
+
+  log->file = ngx_conf_open_file(cycle, name);
+  if (log->file == NULL) {
+    return NULL;
+  }
+
+  return log;
 }
