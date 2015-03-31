@@ -18,6 +18,7 @@
 
 
 // Module callbacks
+static ngx_int_t ngx_http_scm_query_server_proxy_add_variables(ngx_conf_t *cf);
 static ngx_int_t ngx_http_scm_query_server_proxy_init(ngx_conf_t *cf);
 static void* ngx_http_scm_query_server_proxy_create_loc_conf(ngx_conf_t *cf);
 static ngx_int_t ngx_http_scm_query_server_proxy_access_handler(ngx_http_request_t *r);
@@ -37,6 +38,7 @@ ngx_table_elt_t* get_request_header(ngx_http_request_t *r, const char *name);
 ngx_str_t* get_request_header_str(ngx_http_request_t *r, const char *name);
 ngx_str_t* create_base64encoded_string(ngx_pool_t *pool, ngx_str_t *string);
 ngx_log_t *ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name);
+static ngx_int_t ngx_http_scm_access_key_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data);
 
 
 // Config file directives provided by this module
@@ -54,9 +56,16 @@ static ngx_command_t ngx_http_scm_query_server_proxy_commands[] = {
 };
 
 
+// Variables provided by this module
+static ngx_http_variable_t ngx_http_scm_query_server_proxy_variables[] = {
+  { ngx_string("scm_access_key"), NULL, ngx_http_scm_access_key_variable, 0, 0, 0 },
+  { ngx_null_string, NULL, NULL, 0, 0, 0 }
+};
+
+
 // Module context
 static ngx_http_module_t ngx_http_scm_query_server_proxy_module_ctx = {
-  NULL,                                            /* preconfiguration */
+  ngx_http_scm_query_server_proxy_add_variables,   /* preconfiguration */
   ngx_http_scm_query_server_proxy_init,            /* postconfiguration */
   NULL,                                            /* create main configuration */
   NULL,                                            /* init main configuration */
@@ -104,6 +113,29 @@ typedef struct {
 typedef struct {
   ngx_str_t *current_scm_access_key;
 } scm_query_server_proxy_request_ctx_t;
+
+
+// Add variables callback. Called when the server starts up.
+//
+// This function sets up the module's variables
+static ngx_int_t ngx_http_scm_query_server_proxy_add_variables(ngx_conf_t *cf)
+{
+  ngx_http_variable_t  *var, *v;
+
+  for (v = ngx_http_scm_query_server_proxy_variables; v->name.len; v++) {
+    var = ngx_http_add_variable(cf, &v->name, v->flags);
+    if (var == NULL) {
+      return NGX_ERROR;
+    }
+
+    var->get_handler = v->get_handler;
+    var->data = v->data;
+
+    v->index = ngx_http_get_variable_index(cf, &v->name);
+  }
+
+  return NGX_OK;
+}
 
 
 // Init callback. Called when the server starts up.
@@ -603,4 +635,21 @@ ngx_log_t *ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name)
   }
 
   return log;
+}
+
+
+// Variable get_handler that returns data from the request context
+static ngx_int_t ngx_http_scm_access_key_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data)
+{
+  scm_query_server_proxy_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_scm_query_server_proxy_module);
+  if (ctx) {
+    v->not_found = 0;
+    v->valid     = 1;
+    v->len       = ctx->current_scm_access_key->len;
+    v->data      = ctx->current_scm_access_key->data;
+  } else {
+    v->not_found = 1;
+  }
+
+  return NGX_OK;
 }
