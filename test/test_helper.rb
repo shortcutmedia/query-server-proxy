@@ -25,9 +25,13 @@ class BackgroundProcess
   def stop
     return unless @io
 
-    Process.kill 'TERM', @io.pid
-    Process.wait @io.pid
+    Process.kill 'TERM', pid
+    Process.wait pid
     @io = nil
+  end
+
+  def pid
+    @io.pid
   end
 
   def running?
@@ -65,6 +69,14 @@ class Nginx
     end
   end
 
+  def self.reopen_logs config_file
+    if instances[config_file]
+      Process.kill 'USR1', instances[config_file].pid
+    else
+      raise 'nginx-query-server-proxy not running'
+    end
+  end
+
   def self.instances
     @instances ||= Hash.new
   end
@@ -84,5 +96,23 @@ class AuthorizationHeaderEchoServer
     else
       raise 'could not start AuthorizationHeaderEchoServer'
     end
+  end
+end
+
+
+class QueryLog
+
+  def self.clear
+    File.open(path, 'w') {|f| f.write ''}
+  end
+
+  def self.lines
+    return [] unless File.exists? path
+
+    File.read(path).split("\n")
+  end
+
+  def self.path
+    File.join(File.dirname(__FILE__), '../build/nginx-query-server-proxy/logs/queries.log')
   end
 end

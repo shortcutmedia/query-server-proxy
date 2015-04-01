@@ -73,7 +73,7 @@ class QueryProxyServerIntegrationTest < Minitest::Spec
     response.status.must_equal 401
   end
 
-  it 'must return a 401 the Authorization header is invalid' do
+  it 'must return a 401 when the Authorization header is invalid' do
     authorization = "SCMA something:invalid"
 
     response = connection.send verb.to_s.downcase, uri, payload, 'Content-MD5'   => content_md5,
