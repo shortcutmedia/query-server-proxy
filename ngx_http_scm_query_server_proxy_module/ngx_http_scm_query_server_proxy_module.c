@@ -100,6 +100,12 @@ typedef struct {
 } ngx_http_scm_query_server_proxy_loc_conf_t;
 
 
+// This struct stores state associated with a request
+typedef struct {
+  ngx_str_t *current_scm_access_key;
+} scm_query_server_proxy_request_ctx_t;
+
+
 // Init callback. Called when the server starts up.
 //
 // This function sets up the module's callbacks:
@@ -181,15 +187,18 @@ static ngx_int_t ngx_http_scm_query_server_proxy_access_handler(ngx_http_request
         }
       }
 
+      // store access key in the request context.
+      // This is used for logging, see ngx_http_scm_query_server_proxy_log_handler
+      if (scm_access_key) {
+        scm_query_server_proxy_request_ctx_t *ctx = ngx_palloc(r->pool, sizeof(scm_query_server_proxy_request_ctx_t));
+        if (!ctx) { return NGX_HTTP_INTERNAL_SERVER_ERROR; }
+
+        ctx->current_scm_access_key = scm_access_key;
+        ngx_http_set_ctx(r, ctx, ngx_http_scm_query_server_proxy_module);
+      }
+
       if (scm_access_key && scm_signature) {
         ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "parsed Authorization header into SCM access key: %V, SCM signature: %V", scm_access_key, scm_signature);
-
-        // store access key for logging, see ngx_http_scm_query_server_proxy_log_handler
-        ngx_table_elt_t *access_key_header;
-        access_key_header = ngx_list_push(&r->headers_in.headers);
-        access_key_header->hash = 1;
-        ngx_str_set(&access_key_header->key, "X-SCM-Access-Key");
-        access_key_header->value = *scm_access_key;
 
         // fetch rewrite rule for access key
         scm_auth_rewrite_rule_t *rewrite_rule = NULL;
@@ -276,10 +285,15 @@ static ngx_int_t ngx_http_scm_query_server_proxy_log_handler(ngx_http_request_t 
     return NGX_OK;
   }
 
-  // read X-SCM-Access-Key header
-  ngx_str_t *access_key_header_str = get_request_header_str(r, "X-SCM-Access-Key");
-  if (access_key_header_str) {
-    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "X-SCM-Access-Key header present: %V", access_key_header_str);
+  // fetch access key from request context
+  ngx_str_t *scm_access_key = NULL;
+  scm_query_server_proxy_request_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_scm_query_server_proxy_module);
+  if (ctx) {
+    scm_access_key = ctx->current_scm_access_key;
+  }
+
+  if (scm_access_key) {
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "access key present in request context: %V", scm_access_key);
 
     // build log entry
     //
@@ -288,13 +302,13 @@ static ngx_int_t ngx_http_scm_query_server_proxy_log_handler(ngx_http_request_t 
     // e.g. "remote_addr - timestamp - access_key\n"
     u_int line_len = r->connection->addr_text.len      + ngx_strlen(QUERY_LOG_SEPARATOR)
                      + ngx_cached_http_log_iso8601.len + ngx_strlen(QUERY_LOG_SEPARATOR)
-                     + access_key_header_str->len      + ngx_strlen(QUERY_LOG_SUFFIX);
+                     + scm_access_key->len             + ngx_strlen(QUERY_LOG_SUFFIX);
     u_char *line = ngx_palloc(r->pool, line_len + 1);
     if (!line) { return NGX_ERROR; }
 
     ngx_sprintf(line, "%V%s%V%s%V%s", &r->connection->addr_text, QUERY_LOG_SEPARATOR,
                                       &ngx_cached_http_log_iso8601, QUERY_LOG_SEPARATOR,
-                                      access_key_header_str, QUERY_LOG_SUFFIX);
+                                      scm_access_key, QUERY_LOG_SUFFIX);
 
     // write to log file
     u_int written = ngx_write_fd(loc_conf->query_log->file->fd, line, line_len);
@@ -308,7 +322,7 @@ static ngx_int_t ngx_http_scm_query_server_proxy_log_handler(ngx_http_request_t 
     }
 
   } else {
-    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "no X-SCM-Access-Key header found");
+    ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "no access key found in request context");
   }
 
   return NGX_OK;
